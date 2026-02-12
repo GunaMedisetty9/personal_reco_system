@@ -2,34 +2,34 @@
 Sentiment Analysis for Reviews
 """
 
+import os
 import re
+import joblib
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.pipeline import Pipeline
-import joblib
-import os
 
 
 class SentimentAnalyzer:
     """Analyze sentiment of medicine/treatment reviews."""
-    
+
     def __init__(self):
         self.model = None
-        self.labels = {0: 'negative', 1: 'positive', 2: 'neutral'}
-        
+        self.labels = {0: "negative", 1: "positive", 2: "neutral"}
+
         self.positive_words = {
-            'effective', 'works', 'helped', 'excellent', 'great', 'good',
-            'recommend', 'relief', 'improved', 'better', 'amazing', 'wonderful',
-            'perfect', 'cured', 'healed', 'recovered', 'satisfied', 'happy'
+            "effective", "works", "helped", "excellent", "great", "good",
+            "recommend", "relief", "improved", "better", "amazing", "wonderful",
+            "perfect", "cured", "healed", "recovered", "satisfied", "happy",
         }
-        
+
         self.negative_words = {
-            'bad', 'terrible', 'horrible', 'awful', 'worse', 'useless',
-            'ineffective', 'painful', 'side effects', 'nausea', 'headache',
-            'allergic', 'dangerous', 'harmful', 'waste', 'disappointed'
+            "bad", "terrible", "horrible", "awful", "worse", "useless",
+            "ineffective", "painful", "side effects", "nausea", "headache",
+            "allergic", "dangerous", "harmful", "waste", "disappointed",
         }
-    
-    def train(self):
+
+    def train(self) -> None:
         """Train sentiment model."""
         training_texts = [
             "This medicine worked great for me!",
@@ -65,106 +65,107 @@ class SentimentAnalyzer:
             "As expected",
             "Moderate effectiveness",
         ]
-        
+
         training_labels = [
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,  # Positive
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,  # Negative
-            2, 2, 2, 2, 2, 2, 2, 2               # Neutral
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,   # Positive
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   # Negative
+            2, 2, 2, 2, 2, 2, 2, 2                # Neutral
         ]
-        
+
         self.model = Pipeline([
-            ('tfidf', TfidfVectorizer(max_features=1000, ngram_range=(1, 2))),
-            ('clf', MultinomialNB())
+            ("tfidf", TfidfVectorizer(max_features=1000, ngram_range=(1, 2))),
+            ("clf", MultinomialNB()),
         ])
-        
         self.model.fit(training_texts, training_labels)
-    
-    def analyze(self, text: str):
+
+    def analyze(self, text: str) -> dict:
         """Analyze sentiment of text."""
         if self.model is None:
             self.train()
-        
+
         cleaned = self._preprocess(text)
-        
-        prediction = self.model.predict([cleaned])[0]
+        prediction = int(self.model.predict([cleaned])[0])
         probabilities = self.model.predict_proba([cleaned])[0]
-        
-        # Keyword analysis
+
         keyword_score = self._keyword_sentiment(cleaned)
-        
-        # Combine scores
-        ml_score = (prediction - 1)  # Convert 0,1,2 to -1,0,1
+
+        ml_score = (prediction - 1)  # 0,1,2 -> -1,0,1
         combined = (ml_score * 0.7 + keyword_score * 0.3)
-        
+
         if combined > 0.2:
-            sentiment = 'positive'
+            sentiment = "positive"
         elif combined < -0.2:
-            sentiment = 'negative'
+            sentiment = "negative"
         else:
-            sentiment = 'neutral'
-        
+            sentiment = "neutral"
+
         return {
-            'sentiment': sentiment,
-            'confidence': round(max(probabilities), 3),
-            'score': round(combined, 3),
-            'probabilities': {
-                'negative': round(probabilities[0], 3),
-                'positive': round(probabilities[1], 3),
-                'neutral': round(probabilities[2], 3)
-            }
+            "sentiment": sentiment,
+            "confidence": round(float(max(probabilities)), 3),
+            "score": round(float(combined), 3),
+            "probabilities": {
+                "negative": round(float(probabilities[0]), 3),
+                "positive": round(float(probabilities[1]), 3),
+                "neutral": round(float(probabilities[2]), 3),
+            },
         }
-    
-    def analyze_batch(self, reviews: list):
+
+    def analyze_batch(self, reviews: list) -> dict:
         """Analyze multiple reviews."""
         results = []
-        counts = {'positive': 0, 'negative': 0, 'neutral': 0}
-        total_score = 0
-        
+        counts = {"positive": 0, "negative": 0, "neutral": 0}
+        total_score = 0.0
+
         for review in reviews:
             result = self.analyze(review)
             results.append({
-                'text': review[:100] + '...' if len(review) > 100 else review,
-                **result
+                "text": (review[:100] + "...") if len(review) > 100 else review,
+                **result,
             })
-            counts[result['sentiment']] += 1
-            total_score += result['score']
-        
+            counts[result["sentiment"]] += 1
+            total_score += float(result["score"])
+
         n = len(reviews)
-        avg_score = total_score / n if n > 0 else 0
-        
+        avg_score = total_score / n if n > 0 else 0.0
+
         return {
-            'results': results,
-            'summary': {
-                'total': n,
-                'distribution': {k: {'count': v, 'percent': round(v/n*100, 1)} for k, v in counts.items()},
-                'average_score': round(avg_score, 3),
-                'overall': 'positive' if avg_score > 0.2 else 'negative' if avg_score < -0.2 else 'neutral'
-            }
+            "results": results,
+            "summary": {
+                "total": n,
+                "distribution": {
+                    k: {"count": v, "percent": round((v / n * 100), 1) if n else 0.0}
+                    for k, v in counts.items()
+                },
+                "average_score": round(float(avg_score), 3),
+                "overall": "positive" if avg_score > 0.2 else "negative" if avg_score < -0.2 else "neutral",
+            },
         }
-    
-    def _preprocess(self, text: str):
-        """Clean text."""
+
+    def _preprocess(self, text: str) -> str:
         text = text.lower()
-        text = re.sub(r'[^a-zA-Z\s]', '', text)
-        return ' '.join(text.split())
-    
-    def _keyword_sentiment(self, text: str):
-        """Keyword-based sentiment."""
+        text = re.sub(r"[^a-zA-Z\s]", "", text)
+        return " ".join(text.split())
+
+    def _keyword_sentiment(self, text: str) -> float:
         words = set(text.split())
         pos = len(words.intersection(self.positive_words))
         neg = len(words.intersection(self.negative_words))
         total = pos + neg
-        return (pos - neg) / total if total > 0 else 0
-    
-    def save(self, path: str):
+        return (pos - neg) / total if total > 0 else 0.0
+
+    def save(self, path: str) -> None:
         """Save model."""
-        joblib.dump({'model': self.model, 'labels': self.labels}, path)
-    
-    def load(self, path: str):
-        """Load model."""
-        if os.path.exists(path):
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        joblib.dump({"model": self.model, "labels": self.labels}, path)
+
+    def load(self, path: str) -> bool:
+        """Load model. Returns False if incompatible/corrupt pickle."""
+        if not os.path.exists(path):
+            return False
+        try:
             data = joblib.load(path)
-            self.model = data['model']
-            self.labels = data['labels']
-            return True
-        return False
+            self.model = data.get("model")
+            self.labels = data.get("labels", self.labels)
+            return self.model is not None
+        except Exception:
+            return False
