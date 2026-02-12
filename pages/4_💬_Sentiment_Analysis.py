@@ -11,15 +11,11 @@ from sklearn.pipeline import Pipeline
 
 
 class SentimentAnalyzer:
-    """Analyze sentiment of medicine/treatment reviews."""
-
-    MODEL_VERSION = 2  # bump this when you change labels/training logic
+    MODEL_VERSION = 2  # bump when you change label mapping/training
 
     def __init__(self):
         self.model = None
-
-        # IMPORTANT: keep this order consistent with ml_score = prediction - 1
-        # 0 -> negative, 1 -> neutral, 2 -> positive
+        # Must match prediction encoding used in scoring: 0 neg, 1 neutral, 2 pos
         self.labels = {0: "negative", 1: "neutral", 2: "positive"}
 
         self.positive_words = {
@@ -36,11 +32,8 @@ class SentimentAnalyzer:
 
     def train(self) -> None:
         """Train sentiment model."""
-        training_texts = [
-            # Positive
-            "good",
-            "great",
-            "excellent",
+        positive_texts = [
+            "good", "great", "excellent",
             "This medicine worked great for me!",
             "Excellent results highly recommend",
             "Very effective treatment",
@@ -53,11 +46,10 @@ class SentimentAnalyzer:
             "No side effects at all",
             "Affordable and effective",
             "Would use again",
+        ]
 
-            # Negative
-            "bad",
-            "terrible",
-            "awful experience",
+        negative_texts = [
+            "bad", "terrible", "awful",
             "Terrible side effects",
             "Did not work at all",
             "Waste of money",
@@ -70,10 +62,10 @@ class SentimentAnalyzer:
             "Expensive and ineffective",
             "Dangerous medication",
             "Horrible experience",
+        ]
 
-            # Neutral
-            "ok",
-            "fine",
+        neutral_texts = [
+            "ok", "fine",
             "Average results nothing special",
             "It was okay I guess",
             "Not sure if it helped",
@@ -84,13 +76,15 @@ class SentimentAnalyzer:
             "Moderate effectiveness",
         ]
 
-        # Label mapping:
-        # 0=negative, 1=neutral, 2=positive
+        training_texts = positive_texts + negative_texts + neutral_texts
         training_labels = (
-            [2] * 14 +   # positive samples count above
-            [0] * 15 +   # negative samples count above
-            [1] * 10     # neutral samples count above
+            [2] * len(positive_texts) +
+            [0] * len(negative_texts) +
+            [1] * len(neutral_texts)
         )
+
+        # Safety check (prevents the exact error you got)
+        assert len(training_texts) == len(training_labels), (len(training_texts), len(training_labels))
 
         self.model = Pipeline([
             ("tfidf", TfidfVectorizer(max_features=1000, ngram_range=(1, 2))),
@@ -99,18 +93,15 @@ class SentimentAnalyzer:
         self.model.fit(training_texts, training_labels)
 
     def analyze(self, text: str) -> dict:
-        """Analyze sentiment of text."""
         if self.model is None:
             self.train()
 
         cleaned = self._preprocess(text)
-        prediction = int(self.model.predict([cleaned])[0])
-        probabilities = self.model.predict_proba([cleaned])[0]  # order matches classes [0,1,2]
+        prediction = int(self.model.predict([cleaned])[0])   # 0,1,2
+        probabilities = self.model.predict_proba([cleaned])[0]
 
         keyword_score = self._keyword_sentiment(cleaned)
-
-        # Works ONLY if prediction encoding is: 0 neg, 1 neutral, 2 pos
-        ml_score = (prediction - 1)  # -> -1, 0, +1
+        ml_score = prediction - 1  # 0,1,2 -> -1,0,+1
         combined = (ml_score * 0.7 + keyword_score * 0.3)
 
         if combined > 0.2:
@@ -131,37 +122,6 @@ class SentimentAnalyzer:
             },
         }
 
-    def analyze_batch(self, reviews: list) -> dict:
-        """Analyze multiple reviews."""
-        results = []
-        counts = {"positive": 0, "negative": 0, "neutral": 0}
-        total_score = 0.0
-
-        for review in reviews:
-            result = self.analyze(review)
-            results.append({
-                "text": (review[:100] + "...") if len(review) > 100 else review,
-                **result,
-            })
-            counts[result["sentiment"]] += 1
-            total_score += float(result["score"])
-
-        n = len(reviews)
-        avg_score = total_score / n if n > 0 else 0.0
-
-        return {
-            "results": results,
-            "summary": {
-                "total": n,
-                "distribution": {
-                    k: {"count": v, "percent": round((v / n * 100), 1) if n else 0.0}
-                    for k, v in counts.items()
-                },
-                "average_score": round(float(avg_score), 3),
-                "overall": "positive" if avg_score > 0.2 else "negative" if avg_score < -0.2 else "neutral",
-            },
-        }
-
     def _preprocess(self, text: str) -> str:
         text = text.lower()
         text = re.sub(r"[^a-zA-Z\s]", "", text)
@@ -175,7 +135,6 @@ class SentimentAnalyzer:
         return (pos - neg) / total if total > 0 else 0.0
 
     def save(self, path: str) -> None:
-        """Save model."""
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         joblib.dump(
             {"model": self.model, "labels": self.labels, "version": self.MODEL_VERSION},
@@ -183,17 +142,13 @@ class SentimentAnalyzer:
         )
 
     def load(self, path: str) -> bool:
-        """Load model. Returns False if incompatible/old pickle."""
         if not os.path.exists(path):
             return False
         try:
             data = joblib.load(path)
-
-            # Force retrain if old file (no version) or wrong version
             if data.get("version") != self.MODEL_VERSION:
                 self.model = None
                 return False
-
             self.model = data.get("model")
             self.labels = data.get("labels", self.labels)
             return self.model is not None
