@@ -13,9 +13,14 @@ from sklearn.pipeline import Pipeline
 class SentimentAnalyzer:
     """Analyze sentiment of medicine/treatment reviews."""
 
+    MODEL_VERSION = 2  # bump this when you change labels/training logic
+
     def __init__(self):
         self.model = None
-        self.labels = {0: "negative", 1: "positive", 2: "neutral"}
+
+        # IMPORTANT: keep this order consistent with ml_score = prediction - 1
+        # 0 -> negative, 1 -> neutral, 2 -> positive
+        self.labels = {0: "negative", 1: "neutral", 2: "positive"}
 
         self.positive_words = {
             "effective", "works", "helped", "excellent", "great", "good",
@@ -25,13 +30,17 @@ class SentimentAnalyzer:
 
         self.negative_words = {
             "bad", "terrible", "horrible", "awful", "worse", "useless",
-            "ineffective", "painful", "side effects", "nausea", "headache",
+            "ineffective", "painful", "nausea", "headache",
             "allergic", "dangerous", "harmful", "waste", "disappointed",
         }
 
     def train(self) -> None:
         """Train sentiment model."""
         training_texts = [
+            # Positive
+            "good",
+            "great",
+            "excellent",
             "This medicine worked great for me!",
             "Excellent results highly recommend",
             "Very effective treatment",
@@ -44,6 +53,11 @@ class SentimentAnalyzer:
             "No side effects at all",
             "Affordable and effective",
             "Would use again",
+
+            # Negative
+            "bad",
+            "terrible",
+            "awful experience",
             "Terrible side effects",
             "Did not work at all",
             "Waste of money",
@@ -56,6 +70,10 @@ class SentimentAnalyzer:
             "Expensive and ineffective",
             "Dangerous medication",
             "Horrible experience",
+
+            # Neutral
+            "ok",
+            "fine",
             "Average results nothing special",
             "It was okay I guess",
             "Not sure if it helped",
@@ -66,11 +84,13 @@ class SentimentAnalyzer:
             "Moderate effectiveness",
         ]
 
-        training_labels = [
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,   # Positive
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   # Negative
-            2, 2, 2, 2, 2, 2, 2, 2                # Neutral
-        ]
+        # Label mapping:
+        # 0=negative, 1=neutral, 2=positive
+        training_labels = (
+            [2] * 14 +   # positive samples count above
+            [0] * 15 +   # negative samples count above
+            [1] * 10     # neutral samples count above
+        )
 
         self.model = Pipeline([
             ("tfidf", TfidfVectorizer(max_features=1000, ngram_range=(1, 2))),
@@ -85,11 +105,12 @@ class SentimentAnalyzer:
 
         cleaned = self._preprocess(text)
         prediction = int(self.model.predict([cleaned])[0])
-        probabilities = self.model.predict_proba([cleaned])[0]
+        probabilities = self.model.predict_proba([cleaned])[0]  # order matches classes [0,1,2]
 
         keyword_score = self._keyword_sentiment(cleaned)
 
-        ml_score = (prediction - 1)  # 0,1,2 -> -1,0,1
+        # Works ONLY if prediction encoding is: 0 neg, 1 neutral, 2 pos
+        ml_score = (prediction - 1)  # -> -1, 0, +1
         combined = (ml_score * 0.7 + keyword_score * 0.3)
 
         if combined > 0.2:
@@ -105,8 +126,8 @@ class SentimentAnalyzer:
             "score": round(float(combined), 3),
             "probabilities": {
                 "negative": round(float(probabilities[0]), 3),
-                "positive": round(float(probabilities[1]), 3),
-                "neutral": round(float(probabilities[2]), 3),
+                "neutral": round(float(probabilities[1]), 3),
+                "positive": round(float(probabilities[2]), 3),
             },
         }
 
@@ -156,14 +177,23 @@ class SentimentAnalyzer:
     def save(self, path: str) -> None:
         """Save model."""
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        joblib.dump({"model": self.model, "labels": self.labels}, path)
+        joblib.dump(
+            {"model": self.model, "labels": self.labels, "version": self.MODEL_VERSION},
+            path
+        )
 
     def load(self, path: str) -> bool:
-        """Load model. Returns False if incompatible/corrupt pickle."""
+        """Load model. Returns False if incompatible/old pickle."""
         if not os.path.exists(path):
             return False
         try:
             data = joblib.load(path)
+
+            # Force retrain if old file (no version) or wrong version
+            if data.get("version") != self.MODEL_VERSION:
+                self.model = None
+                return False
+
             self.model = data.get("model")
             self.labels = data.get("labels", self.labels)
             return self.model is not None
